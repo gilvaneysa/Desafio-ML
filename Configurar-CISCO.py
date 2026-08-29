@@ -16,21 +16,19 @@ def executar_automacao():
     novo_hostname = entry_hostname.get()
     vlan_id = entry_vlan_id.get()
     vlan_name = entry_vlan_name.get().replace(" ", "_")
+    salvar_config = var_salvar.get() # Verifica se a caixa de salvar está marcada
 
     # ==========================================
     # VALIDAÇÃO FLEXÍVEL DE CAMPOS
     # ==========================================
-    # Apenas IP e Senha são estritamente obrigatórios para conectar
     if not ip or not senha:
         messagebox.showerror("Erro", "Os campos 'IP do Switch' e 'Senha' são obrigatórios para conectar!")
         return
         
-    # Pelo menos uma ação deve ser solicitada (mudar nome ou configurar VLAN)
     if not novo_hostname and not (vlan_id and vlan_name):
         messagebox.showerror("Erro", "Preencha o 'Novo Hostname' ou os dados da 'VLAN' (ID e Nome) para executar alguma configuração!")
         return
         
-    # Se preencheu só metade dos dados da VLAN
     if (vlan_id and not vlan_name) or (not vlan_id and vlan_name):
         messagebox.showerror("Erro", "Para configurar a VLAN, é necessário preencher tanto o ID quanto o Nome!")
         return
@@ -56,16 +54,15 @@ def executar_automacao():
         # ==========================================
         # ETAPA A: VERIFICAÇÃO PRÉVIA DA VLAN
         # ==========================================
-        if vlan_id: # Só faz essa checagem se o usuário pediu para configurar VLAN
+        if vlan_id: 
             saida_vlan = conexao.send_command(f"show vlan id {vlan_id}")
             
             if "not found" not in saida_vlan.lower() and "invalid" not in saida_vlan.lower():
-                # messagebox.askyesno cria uma janela com os botões "Sim" e "Não"
                 resposta = messagebox.askyesno(
                     "VLAN Já Existe", 
                     f"A VLAN {vlan_id} já está criada neste switch!\n\nDeseja continuar e sobrescrever o nome dela?"
                 )
-                if not resposta: # Se o usuário clicar em "Não"
+                if not resposta: 
                     conexao.disconnect()
                     return
 
@@ -120,18 +117,28 @@ def executar_automacao():
                 divergencia = True
                 mensagens_alerta.append(f"Divergência: Nome da VLAN {vlan_id} não bate com '{vlan_name}'.")
 
+        # ==========================================
+        # ETAPA E: SALVAR CONFIGURAÇÃO (WRITE MEMORY)
+        # ==========================================
+        mensagem_salvamento = ""
+        if salvar_config:
+            print("Salvando configurações na NVRAM...")
+            # save_config() lida automaticamente com os prompts do Cisco
+            conexao.save_config() 
+            mensagem_salvamento = "\n\nAs configurações foram salvas na memória do switch (startup-config)."
+
         conexao.disconnect()
 
         # ==========================================
-        # ETAPA E: FEEDBACK AO USUÁRIO
+        # ETAPA F: FEEDBACK AO USUÁRIO
         # ==========================================
         if divergencia:
             texto_alerta = "\n".join(mensagens_alerta)
             messagebox.showwarning("Alerta de Configuração", 
-                                   f"Configuração aplicada, porém foi encontrada uma divergência:\n\n{texto_alerta}")
+                                   f"Configuração aplicada, porém foi encontrada uma divergência:\n\n{texto_alerta}{mensagem_salvamento}")
         else:
             messagebox.showinfo("Sucesso", 
-                                f"Sucesso!\nBackup gerado: {nome_arquivo}\nConfigurações aplicadas e validadas com sucesso!")
+                                f"Sucesso!\nBackup gerado: {nome_arquivo}\nConfigurações aplicadas e validadas com sucesso!{mensagem_salvamento}")
 
     except NetmikoAuthenticationException:
         messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos (ou falha no Enable).")
@@ -147,42 +154,50 @@ def executar_automacao():
 
 janela = tk.Tk()
 janela.title("Configurador de Switch Cisco")
-janela.geometry("400x350") 
+janela.geometry("450x450") # Janela aumentada para acomodar o texto e novo botão
 janela.eval('tk::PlaceWindow . center')
 
-tk.Label(janela, text="IP do Switch:").grid(row=0, column=0, padx=10, pady=5, sticky="e")
-entry_ip = tk.Entry(janela)
-entry_ip.grid(row=0, column=1, padx=10, pady=5)
+# Texto explicativo no topo da interface
+texto_explicativo = "Ferramenta de automação para Switches Cisco.\nPreencha os dados abaixo para alterar Hostname e/ou criar VLANs."
+tk.Label(janela, text=texto_explicativo, justify="center", fg="#333333", font=("Arial", 9, "italic")).grid(row=0, column=0, columnspan=2, pady=10)
 
-tk.Label(janela, text="Usuário (Opcional):").grid(row=1, column=0, padx=10, pady=5, sticky="e")
-entry_usuario = tk.Entry(janela)
-entry_usuario.grid(row=1, column=1, padx=10, pady=5)
+tk.Label(janela, text="IP do Switch:").grid(row=1, column=0, padx=10, pady=5, sticky="e")
+entry_ip = tk.Entry(janela, width=25)
+entry_ip.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
-tk.Label(janela, text="Senha (VTY/Enable):").grid(row=2, column=0, padx=10, pady=5, sticky="e")
-entry_senha = tk.Entry(janela, show="*")
-entry_senha.grid(row=2, column=1, padx=10, pady=5)
+tk.Label(janela, text="Usuário (Opcional):").grid(row=2, column=0, padx=10, pady=5, sticky="e")
+entry_usuario = tk.Entry(janela, width=25)
+entry_usuario.grid(row=2, column=1, padx=10, pady=5, sticky="w")
 
-tk.Label(janela, text="Protocolo:").grid(row=3, column=0, padx=10, pady=5, sticky="e")
+tk.Label(janela, text="Senha (VTY/Enable):").grid(row=3, column=0, padx=10, pady=5, sticky="e")
+entry_senha = tk.Entry(janela, show="*", width=25)
+entry_senha.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+
+tk.Label(janela, text="Protocolo:").grid(row=4, column=0, padx=10, pady=5, sticky="e")
 var_protocolo = tk.StringVar(value="SSH") 
 frame_protocolo = tk.Frame(janela)
-frame_protocolo.grid(row=3, column=1, padx=10, pady=5, sticky="w")
+frame_protocolo.grid(row=4, column=1, padx=10, pady=5, sticky="w")
 tk.Radiobutton(frame_protocolo, text="SSH", variable=var_protocolo, value="SSH").pack(side="left")
 tk.Radiobutton(frame_protocolo, text="Telnet", variable=var_protocolo, value="Telnet").pack(side="left")
 
-# Atualizei os textos da interface para deixar claro que são opcionais
-tk.Label(janela, text="Novo Hostname (Opcional):").grid(row=4, column=0, padx=10, pady=5, sticky="e")
-entry_hostname = tk.Entry(janela)
-entry_hostname.grid(row=4, column=1, padx=10, pady=5)
+tk.Label(janela, text="Novo Hostname (Opcional):").grid(row=5, column=0, padx=10, pady=5, sticky="e")
+entry_hostname = tk.Entry(janela, width=25)
+entry_hostname.grid(row=5, column=1, padx=10, pady=5, sticky="w")
 
-tk.Label(janela, text="ID da VLAN (Opcional):").grid(row=5, column=0, padx=10, pady=5, sticky="e")
-entry_vlan_id = tk.Entry(janela)
-entry_vlan_id.grid(row=5, column=1, padx=10, pady=5)
+tk.Label(janela, text="ID da VLAN (Opcional):").grid(row=6, column=0, padx=10, pady=5, sticky="e")
+entry_vlan_id = tk.Entry(janela, width=25)
+entry_vlan_id.grid(row=6, column=1, padx=10, pady=5, sticky="w")
 
-tk.Label(janela, text="Nome da VLAN (Opcional):").grid(row=6, column=0, padx=10, pady=5, sticky="e")
-entry_vlan_name = tk.Entry(janela)
-entry_vlan_name.grid(row=6, column=1, padx=10, pady=5)
+tk.Label(janela, text="Nome da VLAN (Opcional):").grid(row=7, column=0, padx=10, pady=5, sticky="e")
+entry_vlan_name = tk.Entry(janela, width=25)
+entry_vlan_name.grid(row=7, column=1, padx=10, pady=5, sticky="w")
 
-btn_executar = tk.Button(janela, text="Fazer Backup e Configurar", command=executar_automacao, bg="lightblue")
-btn_executar.grid(row=7, column=0, columnspan=2, pady=20)
+# Checkbox para opção de salvar as configurações (write memory)
+var_salvar = tk.BooleanVar(value=True) # Marcado por padrão
+chk_salvar = tk.Checkbutton(janela, text="Salvar configuração no Switch (write memory)", variable=var_salvar)
+chk_salvar.grid(row=8, column=0, columnspan=2, pady=10)
+
+btn_executar = tk.Button(janela, text="Fazer Backup e Configurar", command=executar_automacao, bg="lightblue", width=25)
+btn_executar.grid(row=9, column=0, columnspan=2, pady=10)
 
 janela.mainloop()
