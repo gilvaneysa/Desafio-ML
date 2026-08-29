@@ -76,6 +76,12 @@ def executar_automacao():
         messagebox.showerror("Erro", "Para configurar a VLAN, é necessário preencher tanto o ID quanto o Nome!")
         return
 
+    # Validação rigorosa do ID da VLAN (Permitir apenas entre 1 e 4094)
+    if vlan_id:
+        if not vlan_id.isdigit() or not (1 <= int(vlan_id) <= 4094):
+            messagebox.showerror("Erro", "ID da VLAN inválido! Insira um número inteiro entre 1 e 4094.")
+            return
+
     tipo_dispositivo = 'cisco_ios' if protocolo == "SSH" else 'cisco_ios_telnet'
 
     switch_device = {
@@ -110,15 +116,13 @@ def executar_automacao():
             saida_vlan_brief = conexao.send_command("show vlan brief")
             nome_duplicado = False
             
-            # Analisa linha por linha a tabela de VLANs do switch
             for linha in saida_vlan_brief.splitlines():
                 partes = linha.split()
                 if len(partes) >= 2:
                     id_encontrado = partes[0]
                     nome_encontrado = partes[1]
-                    # Se o nome bater, mas o ID for diferente, significa que é de outra VLAN
                     if nome_encontrado == vlan_name and id_encontrado != str(vlan_id):
-                        if id_encontrado.isdigit(): # Validação para pular cabeçalhos da tabela
+                        if id_encontrado.isdigit():
                             nome_duplicado = True
                             break
             
