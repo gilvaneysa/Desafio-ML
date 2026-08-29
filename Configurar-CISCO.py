@@ -60,7 +60,7 @@ def executar_automacao():
     usuario = entry_usuario.get()
     senha = entry_senha.get()
     protocolo = var_protocolo.get()
-    novo_hostname = entry_hostname.get().strip() # Remove espaços extras nas pontas
+    novo_hostname = entry_hostname.get().strip()
     vlan_id = entry_vlan_id.get()
     vlan_name = entry_vlan_name.get().replace(" ", "_")
 
@@ -76,12 +76,11 @@ def executar_automacao():
         messagebox.showerror("Erro", "Para configurar a VLAN, é necessário preencher tanto o ID quanto o Nome!")
         return
 
-    # Validação do Hostname (O Cisco IOS não aceita espaços ou caracteres especiais inadequados)
+    # Validação do Hostname
     if novo_hostname:
         if " " in novo_hostname:
             messagebox.showerror("Erro", "Hostname inválido! O nome do switch não pode conter espaços.")
             return
-        # Caracteres comumente proibidos ou indesejados em hostnames Cisco
         caracteres_proibidos = ["/", "\\", "?", "*", "!", "@", "#", "$", "%", "^", "&", "(", ")", "+", "=", "{", "}", "[", "]", "|", ";", ":", "\"", "'", "<", ">", ",", "."]
         if any(char in novo_hostname for char in caracteres_proibidos):
             messagebox.showerror("Erro", "Hostname inválido! Contém caracteres especiais não permitidos pelo switch.")
@@ -123,9 +122,10 @@ def executar_automacao():
                     conexao.disconnect()
                     return
 
-            # 2. Verifica se o Nome da VLAN já está em uso em OUTRO ID
+            # 2. Verifica se o Nome da VLAN já está em uso em OUTRO ID (Capturando o ID correspondente)
             saida_vlan_brief = conexao.send_command("show vlan brief")
             nome_duplicado = False
+            id_duplicado_encontrado = ""
             
             for linha in saida_vlan_brief.splitlines():
                 partes = linha.split()
@@ -135,12 +135,13 @@ def executar_automacao():
                     if nome_encontrado == vlan_name and id_encontrado != str(vlan_id):
                         if id_encontrado.isdigit():
                             nome_duplicado = True
+                            id_duplicado_encontrado = id_encontrado
                             break
             
             if nome_duplicado:
                 resposta_nome = messagebox.askyesno(
                     "Nome Duplicado", 
-                    f"Atenção: O nome '{vlan_name}' já está sendo usado por outra VLAN neste switch!\n\nDeseja continuar e criar a VLAN {vlan_id} com este nome duplicado?"
+                    f"Atenção: O nome '{vlan_name}' já está sendo usado pela VLAN ID {id_duplicado_encontrado} neste switch!\n\nDeseja continuar e criar a VLAN {vlan_id} com este mesmo nome?"
                 )
                 if not resposta_nome:
                     conexao.disconnect()
@@ -250,7 +251,7 @@ tk.Label(janela, text="IP do Switch:").grid(row=1, column=0, padx=10, pady=5, st
 entry_ip = tk.Entry(janela, width=25)
 entry_ip.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
-tk.Label(janela, text="Usuário:").grid(row=2, column=0, padx=10, pady=5, sticky="e")
+tk.Label(janela, text="Usuário (Opcional):").grid(row=2, column=0, padx=10, pady=5, sticky="e")
 entry_usuario = tk.Entry(janela, width=25)
 entry_usuario.grid(row=2, column=1, padx=10, pady=5, sticky="w")
 
