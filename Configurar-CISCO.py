@@ -60,7 +60,7 @@ def executar_automacao():
     usuario = entry_usuario.get()
     senha = entry_senha.get()
     protocolo = var_protocolo.get()
-    novo_hostname = entry_hostname.get()
+    novo_hostname = entry_hostname.get().strip() # Remove espaços extras nas pontas
     vlan_id = entry_vlan_id.get()
     vlan_name = entry_vlan_name.get().replace(" ", "_")
 
@@ -75,6 +75,17 @@ def executar_automacao():
     if (vlan_id and not vlan_name) or (not vlan_id and vlan_name):
         messagebox.showerror("Erro", "Para configurar a VLAN, é necessário preencher tanto o ID quanto o Nome!")
         return
+
+    # Validação do Hostname (O Cisco IOS não aceita espaços ou caracteres especiais inadequados)
+    if novo_hostname:
+        if " " in novo_hostname:
+            messagebox.showerror("Erro", "Hostname inválido! O nome do switch não pode conter espaços.")
+            return
+        # Caracteres comumente proibidos ou indesejados em hostnames Cisco
+        caracteres_proibidos = ["/", "\\", "?", "*", "!", "@", "#", "$", "%", "^", "&", "(", ")", "+", "=", "{", "}", "[", "]", "|", ";", ":", "\"", "'", "<", ">", ",", "."]
+        if any(char in novo_hostname for char in caracteres_proibidos):
+            messagebox.showerror("Erro", "Hostname inválido! Contém caracteres especiais não permitidos pelo switch.")
+            return
 
     # Validação rigorosa do ID da VLAN (Permitir apenas entre 1 e 4094)
     if vlan_id:
