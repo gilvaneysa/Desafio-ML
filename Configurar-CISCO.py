@@ -96,12 +96,9 @@ def executar_automacao():
         prompt_atual = conexao.find_prompt().replace('#', '').replace('>', '')
         nome_arquivo = f"backup_{prompt_atual}_{agora}.txt"
         
-        # O Cisco IOS salva as VLANs no vlan.dat, não no running-config. 
-        # Por isso precisamos rodar um comando separado para as VLANs.
         running_config = conexao.send_command("show running-config")
         tabela_vlans = conexao.send_command("show vlan")
         
-        # Junta os dois resultados em um único arquivo de texto
         conteudo_backup = f"!!! RUNNING CONFIGURATION !!!\n\n{running_config}\n\n\n!!! TABELA DE VLANS !!!\n\n{tabela_vlans}"
         
         with open(nome_arquivo, "w") as arquivo_backup:
@@ -206,11 +203,11 @@ tk.Label(janela, text="Nome da VLAN (Opcional):").grid(row=7, column=0, padx=10,
 entry_vlan_name = tk.Entry(janela, width=25)
 entry_vlan_name.grid(row=7, column=1, padx=10, pady=5, sticky="w")
 
-# Substituição do Checkbox por um Botão Verde Dedicado
-btn_salvar = tk.Button(janela, text="Salvar no Switch (Write Memory)", command=salvar_configuracao, bg="lightgreen", width=25)
-btn_salvar.grid(row=8, column=0, columnspan=2, pady=10)
-
+# INVERSÃO DA ORDEM DOS BOTÕES NO GRID
 btn_executar = tk.Button(janela, text="Fazer Backup e Configurar", command=executar_automacao, bg="lightblue", width=25)
-btn_executar.grid(row=9, column=0, columnspan=2, pady=5)
+btn_executar.grid(row=8, column=0, columnspan=2, pady=10) # Linha 8
+
+btn_salvar = tk.Button(janela, text="Salvar no Switch (Write Memory)", command=salvar_configuracao, bg="lightgreen", width=25)
+btn_salvar.grid(row=9, column=0, columnspan=2, pady=5) # Linha 9
 
 janela.mainloop()
