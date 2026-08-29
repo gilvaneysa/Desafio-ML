@@ -7,8 +7,42 @@ from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticati
 # FUNÇÕES DE AUTOMAÇÃO DE REDE
 # ==========================================
 
+def salvar_configuracao():
+    ip = entry_ip.get()
+    usuario = entry_usuario.get()
+    senha = entry_senha.get()
+    protocolo = var_protocolo.get()
+
+    if not ip or not senha:
+        messagebox.showerror("Erro", "Os campos 'IP do Switch' e 'Senha' são obrigatórios para conectar e salvar!")
+        return
+
+    tipo_dispositivo = 'cisco_ios' if protocolo == "SSH" else 'cisco_ios_telnet'
+
+    switch_device = {
+        'device_type': tipo_dispositivo,
+        'host': ip,
+        'username': usuario,
+        'password': senha,
+        'secret': senha,
+        'global_delay_factor': 2
+    }
+
+    try:
+        conexao = ConnectHandler(**switch_device)
+        conexao.enable()
+        conexao.save_config()
+        conexao.disconnect()
+        messagebox.showinfo("Sucesso", "As configurações foram salvas com sucesso na memória do switch (startup-config)!")
+    except NetmikoAuthenticationException:
+        messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos.")
+    except NetmikoTimeoutException:
+        messagebox.showerror("Erro de Conexão", f"O switch no IP {ip} está inacessível via {protocolo} (Timeout).")
+    except Exception as e:
+        messagebox.showerror("Erro Inesperado", f"Ocorreu um erro: {str(e)}")
+
+
 def executar_automacao():
-    # 1. Coleta os dados da interface gráfica
     ip = entry_ip.get()
     usuario = entry_usuario.get()
     senha = entry_senha.get()
@@ -16,11 +50,7 @@ def executar_automacao():
     novo_hostname = entry_hostname.get()
     vlan_id = entry_vlan_id.get()
     vlan_name = entry_vlan_name.get().replace(" ", "_")
-    salvar_config = var_salvar.get() # Verifica se a caixa de salvar está marcada
 
-    # ==========================================
-    # VALIDAÇÃO FLEXÍVEL DE CAMPOS
-    # ==========================================
     if not ip or not senha:
         messagebox.showerror("Erro", "Os campos 'IP do Switch' e 'Senha' são obrigatórios para conectar!")
         return
@@ -33,10 +63,7 @@ def executar_automacao():
         messagebox.showerror("Erro", "Para configurar a VLAN, é necessário preencher tanto o ID quanto o Nome!")
         return
 
-    if protocolo == "SSH":
-        tipo_dispositivo = 'cisco_ios'
-    else:
-        tipo_dispositivo = 'cisco_ios_telnet'
+    tipo_dispositivo = 'cisco_ios' if protocolo == "SSH" else 'cisco_ios_telnet'
 
     switch_device = {
         'device_type': tipo_dispositivo,
@@ -51,12 +78,8 @@ def executar_automacao():
         conexao = ConnectHandler(**switch_device)
         conexao.enable()
 
-        # ==========================================
-        # ETAPA A: VERIFICAÇÃO PRÉVIA DA VLAN
-        # ==========================================
         if vlan_id: 
             saida_vlan = conexao.send_command(f"show vlan id {vlan_id}")
-            
             if "not found" not in saida_vlan.lower() and "invalid" not in saida_vlan.lower():
                 resposta = messagebox.askyesno(
                     "VLAN Já Existe", 
@@ -67,16 +90,22 @@ def executar_automacao():
                     return
 
         # ==========================================
-        # ETAPA B: BACKUP DA CONFIGURAÇÃO
+        # ETAPA B: BACKUP DA CONFIGURAÇÃO + VLANS
         # ==========================================
         agora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         prompt_atual = conexao.find_prompt().replace('#', '').replace('>', '')
         nome_arquivo = f"backup_{prompt_atual}_{agora}.txt"
         
+        # O Cisco IOS salva as VLANs no vlan.dat, não no running-config. 
+        # Por isso precisamos rodar um comando separado para as VLANs.
         running_config = conexao.send_command("show running-config")
+        tabela_vlans = conexao.send_command("show vlan")
+        
+        # Junta os dois resultados em um único arquivo de texto
+        conteudo_backup = f"!!! RUNNING CONFIGURATION !!!\n\n{running_config}\n\n\n!!! TABELA DE VLANS !!!\n\n{tabela_vlans}"
         
         with open(nome_arquivo, "w") as arquivo_backup:
-            arquivo_backup.write(running_config)
+            arquivo_backup.write(conteudo_backup)
             
         print(f"Backup salvo com sucesso: {nome_arquivo}")
 
@@ -94,10 +123,6 @@ def executar_automacao():
             comandos_configuracao.append("exit")
         
         resultado_config = conexao.send_config_set(comandos_configuracao)
-        
-        print("\n--- MENSAGEM DO SWITCH AO APLICAR A CONFIGURAÇÃO ---")
-        print(resultado_config)
-        print("----------------------------------------------------\n")
 
         # ==========================================
         # ETAPA D: VALIDAÇÃO DAS CONFIGURAÇÕES
@@ -117,28 +142,18 @@ def executar_automacao():
                 divergencia = True
                 mensagens_alerta.append(f"Divergência: Nome da VLAN {vlan_id} não bate com '{vlan_name}'.")
 
-        # ==========================================
-        # ETAPA E: SALVAR CONFIGURAÇÃO (WRITE MEMORY)
-        # ==========================================
-        mensagem_salvamento = ""
-        if salvar_config:
-            print("Salvando configurações na NVRAM...")
-            # save_config() lida automaticamente com os prompts do Cisco
-            conexao.save_config() 
-            mensagem_salvamento = "\n\nAs configurações foram salvas na memória do switch (startup-config)."
-
         conexao.disconnect()
 
         # ==========================================
-        # ETAPA F: FEEDBACK AO USUÁRIO
+        # ETAPA E: FEEDBACK AO USUÁRIO
         # ==========================================
         if divergencia:
             texto_alerta = "\n".join(mensagens_alerta)
             messagebox.showwarning("Alerta de Configuração", 
-                                   f"Configuração aplicada, porém foi encontrada uma divergência:\n\n{texto_alerta}{mensagem_salvamento}")
+                                   f"Configuração aplicada, porém foi encontrada uma divergência:\n\n{texto_alerta}")
         else:
             messagebox.showinfo("Sucesso", 
-                                f"Sucesso!\nBackup gerado: {nome_arquivo}\nConfigurações aplicadas e validadas com sucesso!{mensagem_salvamento}")
+                                f"Sucesso!\nBackup gerado: {nome_arquivo}\nConfigurações aplicadas e validadas com sucesso!")
 
     except NetmikoAuthenticationException:
         messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos (ou falha no Enable).")
@@ -154,10 +169,9 @@ def executar_automacao():
 
 janela = tk.Tk()
 janela.title("Configurador de Switch Cisco")
-janela.geometry("450x450") # Janela aumentada para acomodar o texto e novo botão
+janela.geometry("450x460") 
 janela.eval('tk::PlaceWindow . center')
 
-# Texto explicativo no topo da interface
 texto_explicativo = "Ferramenta de automação para Switches Cisco.\nPreencha os dados abaixo para alterar Hostname e/ou criar VLANs."
 tk.Label(janela, text=texto_explicativo, justify="center", fg="#333333", font=("Arial", 9, "italic")).grid(row=0, column=0, columnspan=2, pady=10)
 
@@ -192,12 +206,11 @@ tk.Label(janela, text="Nome da VLAN (Opcional):").grid(row=7, column=0, padx=10,
 entry_vlan_name = tk.Entry(janela, width=25)
 entry_vlan_name.grid(row=7, column=1, padx=10, pady=5, sticky="w")
 
-# Checkbox para opção de salvar as configurações (write memory)
-var_salvar = tk.BooleanVar(value=True) # Marcado por padrão
-chk_salvar = tk.Checkbutton(janela, text="Salvar configuração no Switch (write memory)", variable=var_salvar)
-chk_salvar.grid(row=8, column=0, columnspan=2, pady=10)
+# Substituição do Checkbox por um Botão Verde Dedicado
+btn_salvar = tk.Button(janela, text="Salvar no Switch (Write Memory)", command=salvar_configuracao, bg="lightgreen", width=25)
+btn_salvar.grid(row=8, column=0, columnspan=2, pady=10)
 
 btn_executar = tk.Button(janela, text="Fazer Backup e Configurar", command=executar_automacao, bg="lightblue", width=25)
-btn_executar.grid(row=9, column=0, columnspan=2, pady=10)
+btn_executar.grid(row=9, column=0, columnspan=2, pady=5)
 
 janela.mainloop()
