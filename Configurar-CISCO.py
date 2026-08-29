@@ -19,7 +19,7 @@ def executar_automacao():
     vlan_name = entry_vlan_name.get().replace(" ", "_")
 
     # Validação: Verifica se os campos vitais estão preenchidos (usuário opcional)
-    if not all([ip, novo_hostname, vlan_id]):
+    if not all([ip, senha, novo_hostname, vlan_id, vlan_name]):
         messagebox.showerror("Erro", "Apenas o campo 'Usuário' pode ficar vazio. Preencha os demais!")
         return
 
@@ -34,8 +34,8 @@ def executar_automacao():
         'host': ip,
         'username': usuario,
         'password': senha,
-        'secret': senha, # Usa a mesma senha para o comando 'enable'
-        'global_delay_factor': 2 # Dá mais tempo para o Telnet ler o prompt da tela
+        'secret': senha,
+        'global_delay_factor': 2
     }
 
     try:
@@ -44,7 +44,20 @@ def executar_automacao():
         conexao.enable()
 
         # ==========================================
-        # ETAPA A: BACKUP DA CONFIGURAÇÃO
+        # ETAPA A: VERIFICAÇÃO PRÉVIA DA VLAN
+        # ==========================================
+        # Envia o comando para checar a existência da VLAN antes de fazer qualquer alteração
+        saida_vlan = conexao.send_command(f"show vlan id {vlan_id}")
+        
+        # O Cisco IOS retorna "not found" se a VLAN não existir.
+        # Se essa frase NÃO estiver na resposta, significa que a VLAN já existe.
+        if "not found" not in saida_vlan.lower() and "invalid" not in saida_vlan.lower():
+            conexao.disconnect()
+            messagebox.showwarning("VLAN Já Existe", f"A VLAN {vlan_id} já está criada neste switch!\n\nPor segurança, o script foi interrompido para não sobrescrever a configuração existente.")
+            return
+
+        # ==========================================
+        # ETAPA B: BACKUP DA CONFIGURAÇÃO
         # ==========================================
         agora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         prompt_atual = conexao.find_prompt().replace('#', '').replace('>', '')
@@ -58,7 +71,7 @@ def executar_automacao():
         print(f"Backup salvo com sucesso: {nome_arquivo}")
 
         # ==========================================
-        # ETAPA B: APLICAÇÃO DAS CONFIGURAÇÕES
+        # ETAPA C: APLICAÇÃO DAS CONFIGURAÇÕES
         # ==========================================
         comandos_configuracao = [
             f"hostname {novo_hostname}",
@@ -67,16 +80,14 @@ def executar_automacao():
             "exit"
         ]
         
-        # Aplica os comandos e guarda a resposta de texto do switch
         resultado_config = conexao.send_config_set(comandos_configuracao)
         
-        # Imprime a resposta no terminal para diagnosticarmos o erro
         print("\n--- MENSAGEM DO SWITCH AO APLICAR A CONFIGURAÇÃO ---")
         print(resultado_config)
         print("----------------------------------------------------\n")
 
         # ==========================================
-        # ETAPA C: VALIDAÇÃO DAS CONFIGURAÇÕES
+        # ETAPA D: VALIDAÇÃO DAS CONFIGURAÇÕES
         # ==========================================
         divergencia = False
         mensagens_alerta = []
@@ -86,15 +97,15 @@ def executar_automacao():
             divergencia = True
             mensagens_alerta.append(f"Divergência: Hostname não alterado. Encontrado: {check_hostname}")
 
-        check_vlan = conexao.send_command(f"show vlan id {vlan_id}")
-        if vlan_name not in check_vlan:
+        check_vlan_nova = conexao.send_command(f"show vlan id {vlan_id}")
+        if vlan_name not in check_vlan_nova:
             divergencia = True
             mensagens_alerta.append(f"Divergência: Nome da VLAN {vlan_id} não bate com '{vlan_name}'.")
 
         conexao.disconnect()
 
         # ==========================================
-        # ETAPA D: FEEDBACK AO USUÁRIO
+        # ETAPA E: FEEDBACK AO USUÁRIO
         # ==========================================
         if divergencia:
             texto_alerta = "\n".join(mensagens_alerta)
