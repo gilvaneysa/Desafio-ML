@@ -8,21 +8,21 @@ from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticati
 # ==========================================
 
 def executar_automacao():
-    # 1. Coleta os dados informados pelo usuário na interface gráfica
+    # 1. Coleta os dados da interface gráfica
     ip = entry_ip.get()
     usuario = entry_usuario.get()
     senha = entry_senha.get()
+    protocolo = var_protocolo.get()
     novo_hostname = entry_hostname.get()
     vlan_id = entry_vlan_id.get()
-    vlan_name = entry_vlan_name.get()
-    protocolo = var_protocolo.get() # Pega a seleção: "SSH" ou "Telnet"
+    # Tratamento do nome da VLAN substituindo espaços por underline
+    vlan_name = entry_vlan_name.get().replace(" ", "_")
 
-    # Validação simples para ver se os campos não estão vazios
-    if not all([ip, usuario, senha, novo_hostname, vlan_id, vlan_name]):
-        messagebox.showerror("Erro", "Por favor, preencha todos os campos!")
+    # Validação: Verifica se os campos vitais estão preenchidos (usuário opcional)
+    if not all([ip, novo_hostname, vlan_id]):
+        messagebox.showerror("Erro", "Apenas o campo 'Usuário' pode ficar vazio. Preencha os demais!")
         return
 
-    # Define o tipo de dispositivo Netmiko baseado no protocolo selecionado
     if protocolo == "SSH":
         tipo_dispositivo = 'cisco_ios'
     else:
@@ -34,13 +34,13 @@ def executar_automacao():
         'host': ip,
         'username': usuario,
         'password': senha,
+        'secret': senha, # Usa a mesma senha para o comando 'enable'
+        'global_delay_factor': 2 # Dá mais tempo para o Telnet ler o prompt da tela
     }
 
     try:
         # 2. Conecta ao switch
         conexao = ConnectHandler(**switch_device)
-        
-        # Entra no modo de privilégio (enable) se necessário
         conexao.enable()
 
         # ==========================================
@@ -66,7 +66,14 @@ def executar_automacao():
             f"name {vlan_name}",
             "exit"
         ]
-        conexao.send_config_set(comandos_configuracao)
+        
+        # Aplica os comandos e guarda a resposta de texto do switch
+        resultado_config = conexao.send_config_set(comandos_configuracao)
+        
+        # Imprime a resposta no terminal para diagnosticarmos o erro
+        print("\n--- MENSAGEM DO SWITCH AO APLICAR A CONFIGURAÇÃO ---")
+        print(resultado_config)
+        print("----------------------------------------------------\n")
 
         # ==========================================
         # ETAPA C: VALIDAÇÃO DAS CONFIGURAÇÕES
@@ -98,7 +105,7 @@ def executar_automacao():
                                 f"Sucesso!\nBackup gerado: {nome_arquivo}\nConfigurações aplicadas via {protocolo} e validadas com sucesso!")
 
     except NetmikoAuthenticationException:
-        messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos.")
+        messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos (ou falha no Enable).")
     except NetmikoTimeoutException:
         messagebox.showerror("Erro de Conexão", f"O switch no IP {ip} está inacessível via {protocolo} (Timeout).")
     except Exception as e:
@@ -111,7 +118,6 @@ def executar_automacao():
 
 janela = tk.Tk()
 janela.title("Configurador de Switch Cisco")
-# Aumentei um pouco a altura para caber a nova linha de protocolo
 janela.geometry("380x350") 
 janela.eval('tk::PlaceWindow . center')
 
@@ -119,28 +125,21 @@ tk.Label(janela, text="IP do Switch:").grid(row=0, column=0, padx=10, pady=5, st
 entry_ip = tk.Entry(janela)
 entry_ip.grid(row=0, column=1, padx=10, pady=5)
 
-tk.Label(janela, text="Usuário:").grid(row=1, column=0, padx=10, pady=5, sticky="e")
+tk.Label(janela, text="Usuário (Opcional):").grid(row=1, column=0, padx=10, pady=5, sticky="e")
 entry_usuario = tk.Entry(janela)
 entry_usuario.grid(row=1, column=1, padx=10, pady=5)
 
-tk.Label(janela, text="Senha:").grid(row=2, column=0, padx=10, pady=5, sticky="e")
+tk.Label(janela, text="Senha (VTY/Enable):").grid(row=2, column=0, padx=10, pady=5, sticky="e")
 entry_senha = tk.Entry(janela, show="*")
 entry_senha.grid(row=2, column=1, padx=10, pady=5)
 
-# --- NOVA SEÇÃO: ESCOLHA DE PROTOCOLO ---
+# --- ESCOLHA DE PROTOCOLO ---
 tk.Label(janela, text="Protocolo:").grid(row=3, column=0, padx=10, pady=5, sticky="e")
-
-# Variável para armazenar a escolha (SSH será o padrão)
 var_protocolo = tk.StringVar(value="SSH") 
-
-# Frame para agrupar os botões de escolha na mesma coluna
 frame_protocolo = tk.Frame(janela)
 frame_protocolo.grid(row=3, column=1, padx=10, pady=5, sticky="w")
-
-# Botões de marcação
 tk.Radiobutton(frame_protocolo, text="SSH", variable=var_protocolo, value="SSH").pack(side="left")
 tk.Radiobutton(frame_protocolo, text="Telnet", variable=var_protocolo, value="Telnet").pack(side="left")
-# ----------------------------------------
 
 tk.Label(janela, text="Novo Hostname:").grid(row=4, column=0, padx=10, pady=5, sticky="e")
 entry_hostname = tk.Entry(janela)
