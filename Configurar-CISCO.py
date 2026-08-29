@@ -250,7 +250,7 @@ tk.Label(janela, text="IP do Switch:").grid(row=1, column=0, padx=10, pady=5, st
 entry_ip = tk.Entry(janela, width=25)
 entry_ip.grid(row=1, column=1, padx=10, pady=5, sticky="w")
 
-tk.Label(janela, text="Usuário (Opcional):").grid(row=2, column=0, padx=10, pady=5, sticky="e")
+tk.Label(janela, text="Usuário:").grid(row=2, column=0, padx=10, pady=5, sticky="e")
 entry_usuario = tk.Entry(janela, width=25)
 entry_usuario.grid(row=2, column=1, padx=10, pady=5, sticky="w")
 
