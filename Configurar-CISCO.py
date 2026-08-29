@@ -15,12 +15,24 @@ def executar_automacao():
     protocolo = var_protocolo.get()
     novo_hostname = entry_hostname.get()
     vlan_id = entry_vlan_id.get()
-    # Tratamento do nome da VLAN substituindo espaços por underline
     vlan_name = entry_vlan_name.get().replace(" ", "_")
 
-    # Validação: Verifica se os campos vitais estão preenchidos (usuário opcional)
-    if not all([ip, senha, novo_hostname, vlan_id, vlan_name]):
-        messagebox.showerror("Erro", "Apenas o campo 'Usuário' pode ficar vazio. Preencha os demais!")
+    # ==========================================
+    # VALIDAÇÃO FLEXÍVEL DE CAMPOS
+    # ==========================================
+    # Apenas IP e Senha são estritamente obrigatórios para conectar
+    if not ip or not senha:
+        messagebox.showerror("Erro", "Os campos 'IP do Switch' e 'Senha' são obrigatórios para conectar!")
+        return
+        
+    # Pelo menos uma ação deve ser solicitada (mudar nome ou configurar VLAN)
+    if not novo_hostname and not (vlan_id and vlan_name):
+        messagebox.showerror("Erro", "Preencha o 'Novo Hostname' ou os dados da 'VLAN' (ID e Nome) para executar alguma configuração!")
+        return
+        
+    # Se preencheu só metade dos dados da VLAN
+    if (vlan_id and not vlan_name) or (not vlan_id and vlan_name):
+        messagebox.showerror("Erro", "Para configurar a VLAN, é necessário preencher tanto o ID quanto o Nome!")
         return
 
     if protocolo == "SSH":
@@ -28,7 +40,6 @@ def executar_automacao():
     else:
         tipo_dispositivo = 'cisco_ios_telnet'
 
-    # Dicionário de configuração para o Netmiko
     switch_device = {
         'device_type': tipo_dispositivo,
         'host': ip,
@@ -39,22 +50,24 @@ def executar_automacao():
     }
 
     try:
-        # 2. Conecta ao switch
         conexao = ConnectHandler(**switch_device)
         conexao.enable()
 
         # ==========================================
         # ETAPA A: VERIFICAÇÃO PRÉVIA DA VLAN
         # ==========================================
-        # Envia o comando para checar a existência da VLAN antes de fazer qualquer alteração
-        saida_vlan = conexao.send_command(f"show vlan id {vlan_id}")
-        
-        # O Cisco IOS retorna "not found" se a VLAN não existir.
-        # Se essa frase NÃO estiver na resposta, significa que a VLAN já existe.
-        if "not found" not in saida_vlan.lower() and "invalid" not in saida_vlan.lower():
-            conexao.disconnect()
-            messagebox.showwarning("VLAN Já Existe", f"A VLAN {vlan_id} já está criada neste switch!\n\nPor segurança, o script foi interrompido para não sobrescrever a configuração existente.")
-            return
+        if vlan_id: # Só faz essa checagem se o usuário pediu para configurar VLAN
+            saida_vlan = conexao.send_command(f"show vlan id {vlan_id}")
+            
+            if "not found" not in saida_vlan.lower() and "invalid" not in saida_vlan.lower():
+                # messagebox.askyesno cria uma janela com os botões "Sim" e "Não"
+                resposta = messagebox.askyesno(
+                    "VLAN Já Existe", 
+                    f"A VLAN {vlan_id} já está criada neste switch!\n\nDeseja continuar e sobrescrever o nome dela?"
+                )
+                if not resposta: # Se o usuário clicar em "Não"
+                    conexao.disconnect()
+                    return
 
         # ==========================================
         # ETAPA B: BACKUP DA CONFIGURAÇÃO
@@ -73,12 +86,15 @@ def executar_automacao():
         # ==========================================
         # ETAPA C: APLICAÇÃO DAS CONFIGURAÇÕES
         # ==========================================
-        comandos_configuracao = [
-            f"hostname {novo_hostname}",
-            f"vlan {vlan_id}",
-            f"name {vlan_name}",
-            "exit"
-        ]
+        comandos_configuracao = []
+        
+        if novo_hostname:
+            comandos_configuracao.append(f"hostname {novo_hostname}")
+            
+        if vlan_id:
+            comandos_configuracao.append(f"vlan {vlan_id}")
+            comandos_configuracao.append(f"name {vlan_name}")
+            comandos_configuracao.append("exit")
         
         resultado_config = conexao.send_config_set(comandos_configuracao)
         
@@ -92,15 +108,17 @@ def executar_automacao():
         divergencia = False
         mensagens_alerta = []
 
-        check_hostname = conexao.send_command("show running-config | include hostname")
-        if novo_hostname not in check_hostname:
-            divergencia = True
-            mensagens_alerta.append(f"Divergência: Hostname não alterado. Encontrado: {check_hostname}")
+        if novo_hostname:
+            check_hostname = conexao.send_command("show running-config | include hostname")
+            if novo_hostname not in check_hostname:
+                divergencia = True
+                mensagens_alerta.append(f"Divergência: Hostname não alterado. Encontrado: {check_hostname}")
 
-        check_vlan_nova = conexao.send_command(f"show vlan id {vlan_id}")
-        if vlan_name not in check_vlan_nova:
-            divergencia = True
-            mensagens_alerta.append(f"Divergência: Nome da VLAN {vlan_id} não bate com '{vlan_name}'.")
+        if vlan_id:
+            check_vlan_nova = conexao.send_command(f"show vlan id {vlan_id}")
+            if vlan_name not in check_vlan_nova:
+                divergencia = True
+                mensagens_alerta.append(f"Divergência: Nome da VLAN {vlan_id} não bate com '{vlan_name}'.")
 
         conexao.disconnect()
 
@@ -113,7 +131,7 @@ def executar_automacao():
                                    f"Configuração aplicada, porém foi encontrada uma divergência:\n\n{texto_alerta}")
         else:
             messagebox.showinfo("Sucesso", 
-                                f"Sucesso!\nBackup gerado: {nome_arquivo}\nConfigurações aplicadas via {protocolo} e validadas com sucesso!")
+                                f"Sucesso!\nBackup gerado: {nome_arquivo}\nConfigurações aplicadas e validadas com sucesso!")
 
     except NetmikoAuthenticationException:
         messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos (ou falha no Enable).")
@@ -129,7 +147,7 @@ def executar_automacao():
 
 janela = tk.Tk()
 janela.title("Configurador de Switch Cisco")
-janela.geometry("380x350") 
+janela.geometry("400x350") 
 janela.eval('tk::PlaceWindow . center')
 
 tk.Label(janela, text="IP do Switch:").grid(row=0, column=0, padx=10, pady=5, sticky="e")
@@ -144,7 +162,6 @@ tk.Label(janela, text="Senha (VTY/Enable):").grid(row=2, column=0, padx=10, pady
 entry_senha = tk.Entry(janela, show="*")
 entry_senha.grid(row=2, column=1, padx=10, pady=5)
 
-# --- ESCOLHA DE PROTOCOLO ---
 tk.Label(janela, text="Protocolo:").grid(row=3, column=0, padx=10, pady=5, sticky="e")
 var_protocolo = tk.StringVar(value="SSH") 
 frame_protocolo = tk.Frame(janela)
@@ -152,15 +169,16 @@ frame_protocolo.grid(row=3, column=1, padx=10, pady=5, sticky="w")
 tk.Radiobutton(frame_protocolo, text="SSH", variable=var_protocolo, value="SSH").pack(side="left")
 tk.Radiobutton(frame_protocolo, text="Telnet", variable=var_protocolo, value="Telnet").pack(side="left")
 
-tk.Label(janela, text="Novo Hostname:").grid(row=4, column=0, padx=10, pady=5, sticky="e")
+# Atualizei os textos da interface para deixar claro que são opcionais
+tk.Label(janela, text="Novo Hostname (Opcional):").grid(row=4, column=0, padx=10, pady=5, sticky="e")
 entry_hostname = tk.Entry(janela)
 entry_hostname.grid(row=4, column=1, padx=10, pady=5)
 
-tk.Label(janela, text="ID da VLAN:").grid(row=5, column=0, padx=10, pady=5, sticky="e")
+tk.Label(janela, text="ID da VLAN (Opcional):").grid(row=5, column=0, padx=10, pady=5, sticky="e")
 entry_vlan_id = tk.Entry(janela)
 entry_vlan_id.grid(row=5, column=1, padx=10, pady=5)
 
-tk.Label(janela, text="Nome da VLAN:").grid(row=6, column=0, padx=10, pady=5, sticky="e")
+tk.Label(janela, text="Nome da VLAN (Opcional):").grid(row=6, column=0, padx=10, pady=5, sticky="e")
 entry_vlan_name = tk.Entry(janela)
 entry_vlan_name.grid(row=6, column=1, padx=10, pady=5)
 
