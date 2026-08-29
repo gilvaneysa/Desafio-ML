@@ -203,11 +203,11 @@ tk.Label(janela, text="Nome da VLAN (Opcional):").grid(row=7, column=0, padx=10,
 entry_vlan_name = tk.Entry(janela, width=25)
 entry_vlan_name.grid(row=7, column=1, padx=10, pady=5, sticky="w")
 
-# INVERSÃO DA ORDEM DOS BOTÕES NO GRID
+# BOTÕES NA ORDEM CORRETA
 btn_executar = tk.Button(janela, text="Fazer Backup e Configurar", command=executar_automacao, bg="lightblue", width=25)
-btn_executar.grid(row=8, column=0, columnspan=2, pady=10) # Linha 8
+btn_executar.grid(row=8, column=0, columnspan=2, pady=10)
 
 btn_salvar = tk.Button(janela, text="Salvar no Switch (Write Memory)", command=salvar_configuracao, bg="lightgreen", width=25)
-btn_salvar.grid(row=9, column=0, columnspan=2, pady=5) # Linha 9
+btn_salvar.grid(row=9, column=0, columnspan=2, pady=5)
 
 janela.mainloop()
