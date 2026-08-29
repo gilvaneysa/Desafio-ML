@@ -92,16 +92,42 @@ def executar_automacao():
         conexao.enable()
 
         # ==========================================
-        # ETAPA A: VERIFICAÇÃO PRÉVIA DA VLAN
+        # ETAPA A: VERIFICAÇÃO PRÉVIA DA VLAN (ID e Nome)
         # ==========================================
-        if vlan_id: 
-            saida_vlan = conexao.send_command(f"show vlan id {vlan_id}")
-            if "not found" not in saida_vlan.lower() and "invalid" not in saida_vlan.lower():
-                resposta = messagebox.askyesno(
+        if vlan_id and vlan_name: 
+            # 1. Verifica se o ID da VLAN já existe
+            saida_vlan_id = conexao.send_command(f"show vlan id {vlan_id}")
+            if "not found" not in saida_vlan_id.lower() and "invalid" not in saida_vlan_id.lower():
+                resposta_id = messagebox.askyesno(
                     "VLAN Já Existe", 
                     f"A VLAN {vlan_id} já está criada neste switch!\n\nDeseja continuar e sobrescrever o nome dela?"
                 )
-                if not resposta: 
+                if not resposta_id: 
+                    conexao.disconnect()
+                    return
+
+            # 2. Verifica se o Nome da VLAN já está em uso em OUTRO ID
+            saida_vlan_brief = conexao.send_command("show vlan brief")
+            nome_duplicado = False
+            
+            # Analisa linha por linha a tabela de VLANs do switch
+            for linha in saida_vlan_brief.splitlines():
+                partes = linha.split()
+                if len(partes) >= 2:
+                    id_encontrado = partes[0]
+                    nome_encontrado = partes[1]
+                    # Se o nome bater, mas o ID for diferente, significa que é de outra VLAN
+                    if nome_encontrado == vlan_name and id_encontrado != str(vlan_id):
+                        if id_encontrado.isdigit(): # Validação para pular cabeçalhos da tabela
+                            nome_duplicado = True
+                            break
+            
+            if nome_duplicado:
+                resposta_nome = messagebox.askyesno(
+                    "Nome Duplicado", 
+                    f"Atenção: O nome '{vlan_name}' já está sendo usado por outra VLAN neste switch!\n\nDeseja continuar e criar a VLAN {vlan_id} com este nome duplicado?"
+                )
+                if not resposta_nome:
                     conexao.disconnect()
                     return
 
@@ -199,7 +225,7 @@ def salvar_configuracao():
 
 janela = tk.Tk()
 janela.title("Configurador de Switch Cisco")
-janela.geometry("450x500") # Janela aumentada para caber o 3º botão
+janela.geometry("450x500") 
 janela.eval('tk::PlaceWindow . center')
 
 texto_explicativo = "Ferramenta de automação para Switches Cisco.\nPreencha os dados abaixo para alterar Hostname e/ou criar VLANs."
