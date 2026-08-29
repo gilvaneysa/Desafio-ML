@@ -7,14 +7,14 @@ from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticati
 # FUNÇÕES DE AUTOMAÇÃO DE REDE
 # ==========================================
 
-def salvar_configuracao():
+def fazer_backup():
     ip = entry_ip.get()
     usuario = entry_usuario.get()
     senha = entry_senha.get()
     protocolo = var_protocolo.get()
 
     if not ip or not senha:
-        messagebox.showerror("Erro", "Os campos 'IP do Switch' e 'Senha' são obrigatórios para conectar e salvar!")
+        messagebox.showerror("Erro", "Os campos 'IP do Switch' e 'Senha' são obrigatórios para conectar e fazer backup!")
         return
 
     tipo_dispositivo = 'cisco_ios' if protocolo == "SSH" else 'cisco_ios_telnet'
@@ -31,9 +31,22 @@ def salvar_configuracao():
     try:
         conexao = ConnectHandler(**switch_device)
         conexao.enable()
-        conexao.save_config()
+        
+        agora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        prompt_atual = conexao.find_prompt().replace('#', '').replace('>', '')
+        nome_arquivo = f"backup_{prompt_atual}_{agora}.txt"
+        
+        running_config = conexao.send_command("show running-config")
+        tabela_vlans = conexao.send_command("show vlan")
+        
+        conteudo_backup = f"!!! RUNNING CONFIGURATION !!!\n\n{running_config}\n\n\n!!! TABELA DE VLANS !!!\n\n{tabela_vlans}"
+        
+        with open(nome_arquivo, "w") as arquivo_backup:
+            arquivo_backup.write(conteudo_backup)
+            
         conexao.disconnect()
-        messagebox.showinfo("Sucesso", "As configurações foram salvas com sucesso na memória do switch (startup-config)!")
+        messagebox.showinfo("Sucesso", f"Backup realizado com sucesso!\nSalvo no arquivo: {nome_arquivo}")
+
     except NetmikoAuthenticationException:
         messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos.")
     except NetmikoTimeoutException:
@@ -78,6 +91,9 @@ def executar_automacao():
         conexao = ConnectHandler(**switch_device)
         conexao.enable()
 
+        # ==========================================
+        # ETAPA A: VERIFICAÇÃO PRÉVIA DA VLAN
+        # ==========================================
         if vlan_id: 
             saida_vlan = conexao.send_command(f"show vlan id {vlan_id}")
             if "not found" not in saida_vlan.lower() and "invalid" not in saida_vlan.lower():
@@ -90,24 +106,7 @@ def executar_automacao():
                     return
 
         # ==========================================
-        # ETAPA B: BACKUP DA CONFIGURAÇÃO + VLANS
-        # ==========================================
-        agora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        prompt_atual = conexao.find_prompt().replace('#', '').replace('>', '')
-        nome_arquivo = f"backup_{prompt_atual}_{agora}.txt"
-        
-        running_config = conexao.send_command("show running-config")
-        tabela_vlans = conexao.send_command("show vlan")
-        
-        conteudo_backup = f"!!! RUNNING CONFIGURATION !!!\n\n{running_config}\n\n\n!!! TABELA DE VLANS !!!\n\n{tabela_vlans}"
-        
-        with open(nome_arquivo, "w") as arquivo_backup:
-            arquivo_backup.write(conteudo_backup)
-            
-        print(f"Backup salvo com sucesso: {nome_arquivo}")
-
-        # ==========================================
-        # ETAPA C: APLICAÇÃO DAS CONFIGURAÇÕES
+        # ETAPA B: APLICAÇÃO DAS CONFIGURAÇÕES
         # ==========================================
         comandos_configuracao = []
         
@@ -122,7 +121,7 @@ def executar_automacao():
         resultado_config = conexao.send_config_set(comandos_configuracao)
 
         # ==========================================
-        # ETAPA D: VALIDAÇÃO DAS CONFIGURAÇÕES
+        # ETAPA C: VALIDAÇÃO DAS CONFIGURAÇÕES
         # ==========================================
         divergencia = False
         mensagens_alerta = []
@@ -142,18 +141,52 @@ def executar_automacao():
         conexao.disconnect()
 
         # ==========================================
-        # ETAPA E: FEEDBACK AO USUÁRIO
+        # ETAPA D: FEEDBACK AO USUÁRIO
         # ==========================================
         if divergencia:
             texto_alerta = "\n".join(mensagens_alerta)
             messagebox.showwarning("Alerta de Configuração", 
                                    f"Configuração aplicada, porém foi encontrada uma divergência:\n\n{texto_alerta}")
         else:
-            messagebox.showinfo("Sucesso", 
-                                f"Sucesso!\nBackup gerado: {nome_arquivo}\nConfigurações aplicadas e validadas com sucesso!")
+            messagebox.showinfo("Sucesso", "Configurações aplicadas e validadas com sucesso!")
 
     except NetmikoAuthenticationException:
         messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos (ou falha no Enable).")
+    except NetmikoTimeoutException:
+        messagebox.showerror("Erro de Conexão", f"O switch no IP {ip} está inacessível via {protocolo} (Timeout).")
+    except Exception as e:
+        messagebox.showerror("Erro Inesperado", f"Ocorreu um erro: {str(e)}")
+
+
+def salvar_configuracao():
+    ip = entry_ip.get()
+    usuario = entry_usuario.get()
+    senha = entry_senha.get()
+    protocolo = var_protocolo.get()
+
+    if not ip or not senha:
+        messagebox.showerror("Erro", "Os campos 'IP do Switch' e 'Senha' são obrigatórios para conectar e salvar!")
+        return
+
+    tipo_dispositivo = 'cisco_ios' if protocolo == "SSH" else 'cisco_ios_telnet'
+
+    switch_device = {
+        'device_type': tipo_dispositivo,
+        'host': ip,
+        'username': usuario,
+        'password': senha,
+        'secret': senha,
+        'global_delay_factor': 2
+    }
+
+    try:
+        conexao = ConnectHandler(**switch_device)
+        conexao.enable()
+        conexao.save_config()
+        conexao.disconnect()
+        messagebox.showinfo("Sucesso", "As configurações foram salvas com sucesso na memória do switch (startup-config)!")
+    except NetmikoAuthenticationException:
+        messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos.")
     except NetmikoTimeoutException:
         messagebox.showerror("Erro de Conexão", f"O switch no IP {ip} está inacessível via {protocolo} (Timeout).")
     except Exception as e:
@@ -166,7 +199,7 @@ def executar_automacao():
 
 janela = tk.Tk()
 janela.title("Configurador de Switch Cisco")
-janela.geometry("450x460") 
+janela.geometry("450x500") # Janela aumentada para caber o 3º botão
 janela.eval('tk::PlaceWindow . center')
 
 texto_explicativo = "Ferramenta de automação para Switches Cisco.\nPreencha os dados abaixo para alterar Hostname e/ou criar VLANs."
@@ -203,11 +236,17 @@ tk.Label(janela, text="Nome da VLAN (Opcional):").grid(row=7, column=0, padx=10,
 entry_vlan_name = tk.Entry(janela, width=25)
 entry_vlan_name.grid(row=7, column=1, padx=10, pady=5, sticky="w")
 
-# BOTÕES NA ORDEM CORRETA
-btn_executar = tk.Button(janela, text="Fazer Backup e Configurar", command=executar_automacao, bg="lightblue", width=25)
-btn_executar.grid(row=8, column=0, columnspan=2, pady=10)
+# ==========================================
+# BOTÕES INDEPENDENTES
+# ==========================================
+
+btn_backup = tk.Button(janela, text="Fazer Backup Completo", command=fazer_backup, bg="lightyellow", width=25)
+btn_backup.grid(row=8, column=0, columnspan=2, pady=(15, 5))
+
+btn_executar = tk.Button(janela, text="Aplicar Configurações", command=executar_automacao, bg="lightblue", width=25)
+btn_executar.grid(row=9, column=0, columnspan=2, pady=5)
 
 btn_salvar = tk.Button(janela, text="Salvar no Switch (Write Memory)", command=salvar_configuracao, bg="lightgreen", width=25)
-btn_salvar.grid(row=9, column=0, columnspan=2, pady=5)
+btn_salvar.grid(row=10, column=0, columnspan=2, pady=5)
 
 janela.mainloop()
