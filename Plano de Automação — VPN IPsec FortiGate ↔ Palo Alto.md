@@ -4,7 +4,7 @@
 
 Este documento define um plano técnico para automatizar a implantação de uma VPN IPsec site-to-site entre um **FortiGate** e um **Palo Alto Networks**, contemplando desde a coleta e validação dos parâmetros até a configuração, ativação, validação operacional e rollback.
 
-O objetivo da automação é reduzir intervenção manual, padronizar configurações, minimizar erros de parametrização e produzir evidências suficientes para auditoria e troubleshooting.
+O objetivo da automação é reduzir a intervenção manual, padronizar configurações, minimizar erros de parametrização e produzir evidências suficientes para auditoria e troubleshooting.
 
 A automação não deverá gerar configurações duplicadas nem alterar parâmetros que não façam parte do escopo da VPN.
 
@@ -125,7 +125,187 @@ PAN-OS XML API
 ```
 ---
 
-# 5. Variáveis da automação
+# 5. Arquitetura de comunicação
+
+```text
+                         Python Automation
+                                |
+                     HTTPS / TLS 1.2+
+                                |
+               +----------------+----------------+
+               |                                 |
+               v                                 v
+        FortiGate API                       Palo Alto API
+               |                                 |
+        REST API                         REST API / XML API
+               |                                 |
+               v                                 v
+        FortiOS CMDB                       PAN-OS
+```
+
+O servidor onde o Python será executado deve ter conectividade somente com as interfaces de gerenciamento dos firewalls, preferencialmente através de uma rede de gerenciamento dedicada.
+
+## FortiGate — API utilizada
+
+**FortiOS REST API**
+
+```text
+https://<FORTIGATE>/api/v2/
+```
+
+**Exemplo:**
+
+```text
+https://10.10.100.10/api/v2/cmdb/firewall/address
+```
+
+A documentação oficial demonstra a utilização do endpoint `api/v2/cmdb/firewall/address` e autenticação através de `Authorization: Bearer <API-TOKEN>`.
+O acesso deve ser feito por HTTPS.
+
+**Referência:** https://docs.fortinet.com/document/fortigate/latest/administration-guide/940602/using-apis
+
+### Preparação do FortiGate
+
+Essa etapa é apenas no FortiGate.
+
+A automação deve possuir uma identidade própria. O FortiGate deverá possuir um REST API Admin com token específico para a automação.
+
+Isso permite:
+
+- Auditoria.
+- Revogação independente.
+- Controle de permissões.
+- Identificação das alterações.
+- Rotação de credenciais.
+
+```text
+Python
+   |
+   | Bearer Token
+   v
+FortiGate
+   |
+   +--- API Admin
+```
+
+O token não deve ficar no Git; o ideal seria ficar no Secret Manager.
+O FortiGate deve aceitar a administração/API apenas a partir do IP do servidor de automação.
+
+### Exemplo FortiGate — GET
+
+```python
+import requests
+
+url = "https://10.10.100.10/api/v2/cmdb/firewall/address"
+
+headers = {
+    "Authorization": "Bearer API_TOKEN",
+    "Accept": "application/json"
+}
+
+response = requests.get(
+    url,
+    headers=headers,
+    timeout=10,
+    verify=True
+)
+
+response.raise_for_status()
+data = response.json()
+print(data)
+```
+
+A biblioteca Python utilizada é a `requests`.
+
+O endpoint e payload exatos precisam ser validados contra a versão específica do FortiOS utilizada, porque o schema CMDB pode variar entre releases.
+A automação deve ser desenvolvida e testada contra a versão de FortiOS efetivamente utilizada em produção.
+
+## Palo Alto — estratégia de API
+
+O PAN-OS disponibiliza REST API e XML API.
+A REST API é adequada para operações CRUD de objetos e políticas, mas a própria Palo Alto documenta que ela cobre apenas um subconjunto das funções e que o XML API ainda é necessário para determinadas operações, incluindo completar configurações e commits.
+
+Portanto:
+
+```text
+Palo Alto
+    |
+    +---- REST API
+    |       |
+    |       +-- CRUD
+    |       +-- Objects
+    |       +-- Policies
+    |
+    +---- XML API
+            |
+            +-- Configuration
+            +-- Operational commands
+            +-- Commit
+            +-- funções não cobertas pelo REST
+```
+
+A API utiliza uma API Key.
+A documentação atual permite enviar a chave no header:
+
+```text
+X-PAN-KEY: <API_KEY>
+```
+
+**Referência:** https://docs.paloaltonetworks.com/pan-os/11-1/pan-os-panorama-api/about-the-pan-os-xml-api/structure-of-a-pan-os-xml-api-request/api-authentication-and-security
+
+### Preparação do Palo Alto
+
+A automação deve possuir uma identidade própria. Criaria um administrador exclusivo. A conta deve ter apenas as permissões necessárias. A documentação do PAN-OS destaca que as APIs podem utilizar roles administrativos granulares, permitindo restringir o acesso a determinadas funcionalidades.
+
+O gerenciamento deve ser acessível apenas pelo servidor de automação.
+
+### Palo Alto — REST API
+
+O padrão de endpoint REST é:
+
+```text
+https://<IP>/restapi/<PAN-OS-version>/<resource>
+```
+
+**Exemplo:**
+
+```python
+url = (
+    "https://10.10.100.20/"
+    "restapi/v11.1/..."
+)
+
+headers = {
+    "X-PAN-KEY": api_key,
+    "Accept": "application/json"
+}
+```
+
+### Palo Alto — XML API — exemplo
+
+```python
+url = "https://10.10.100.20/api/"
+
+params = {
+    "type": "config",
+    "action": "show",
+    "key": api_key,
+    "xpath": "/config/..."
+}
+
+response = requests.post(
+    url,
+    params=params,
+    timeout=10,
+    verify=True
+)
+```
+
+Mesma biblioteca Python utilizada no FortiGate.
+
+---
+
+# 6. Variáveis da automação
 
 A automação não deverá possuir valores de produção diretamente no código.
 
@@ -166,18 +346,17 @@ traffic:
   local_network: "10.10.10.0/24"
   remote_network: "10.20.20.0/24"
 
-Tunnel IP:
+tunnel_ip:
   VPN-FGT-PA-001: "169.255.1.1/30"
   VPN-PA-FGT-001: "169.255.1.2/30"
 
 ```
 
-A chave pré-compartilhada (**PSK**) deverá ser armazenada separadamente, preferencialmente em um **secret manager**, e nunca diretamente no repositório Git. Em caso de um script interativo 
-o usuário poderia preencher os parametros obrigatório inclusive a chave PSK.
+A chave pré-compartilhada (**PSK**) deverá ser armazenada separadamente, preferencialmente em um **secret manager**, e nunca diretamente no repositório Git. Em caso de um script interativo, o usuário poderia preencher os parâmetros obrigatórios, inclusive a chave PSK.
 
 ---
 
-# 6. Fase 1 — Validação de entrada
+# 7. Fase 1 — Validação de entrada
 
 ## Objetivo
 
@@ -202,11 +381,11 @@ A automação deverá validar:
 - Lifetimes.
 - Nome da VPN.
 
-Essa validação seria para verificar se foi preeenhido alguma paramentroãs não aceito pelos dispositivos, como :
--Formato de endereçamento invalido.
--Nome no tunel VPN com espaço ou maior que 15 caracteres para Fortigate e 63 para Paloalto.
+Essa validação serve para verificar se foram preeenhido alguma parâmetros não aceito pelos dispositivos, como :
+- Formato de endereçamento inválido.
+-Nome no túnel VPN com espaço ou com tamanho maior que 15 caracteres para FortiGate e 63 para Palo Alto.
 -Formato de nome da inteface que é diferente em ambos os equipamentos.
--Formato da escrita de algoritmo de criptografia e autenticação exemplo, no Fortigate aes256-sha256 seria equivalente a aes-256-cbc do Paloalto.
+- Formato da escrita dos algoritmos de criptografia e autenticação. Exemplo: no FortiGate, `aes256-sha256` seria equivalente a `aes-256-cbc` do Palo Alto.
 
 ## Validação de redes
 
@@ -240,7 +419,7 @@ PA remote  = 10.10.10.0/24
 
 ---
 
-# 7. Fase 2 — Validação dos equipamentos
+# 8. Fase 2 — Validação dos equipamentos
 
 Nesta fase a automação deverá consultar os equipamentos antes de realizar alterações.
 
@@ -256,13 +435,13 @@ Coletar:
 - Rotas existentes.
 - VPNs existentes.
 - Objetos de firewall relacionados.
-- VDOM, quando utilizado. (Se houver VDOM os paramentros  de configuração devem incluir a informações da VDOM)
+- VDOM, quando utilizado. (Se houver VDOM os parâmetros  de configuração devem incluir a informações da VDOM)
 
 Exemplo conceitual:
 
 ```text
-GET /api/v2/monitor/system/status - consultar o status geral e as informações de saúde do sistema do Fortigate.
-GET /api/?type=op&cmd=<show><system><info></info></system></show>&key=< SUA_API_KEY> consultar o status geral e as informações de saúde do sistema do Palo alto.
+GET /api/v2/monitor/system/status - consultar o status geral e as informações de saúde do sistema do FortiGate.
+GET /api/?type=op&cmd=<show><system><info></info></system></show>&key=< SUA_API_KEY> consultar o status geral e as informações de saúde do sistema do Palo Alto.
 ```
 
 e consultas aos objetos de configuração necessários.
@@ -282,11 +461,11 @@ Coletar:
 - Security Policies.
 - Routes.
 
-É importante consultar as rotas existe nos equipamentos para evitar possível conflito de roteamento, essa verificação é extremamente importante. 
+É importante consultar as rotas existentes nos equipamentos para evitar possível conflito de roteamento. Essa verificação é extremamente importante.
 
 ---
 
-# 8. Fase 3 — Verificação de conflitos
+# 9. Fase 3 — Verificação de conflitos
 
 Antes de criar a VPN, verificar se já existem objetos com os mesmos nomes ou parâmetros.
 
@@ -328,11 +507,11 @@ Se não existir:
 Criar.
 ```
 
-Essa lógica evita que uma execução repetida gere objetos duplicados. Essa checagem se adaqua bastantes para a criação dos objetos que serão utilizados nas politicas de firewall. 
+Essa lógica evita que uma execução repetida gere objetos duplicados. Essa checagem se adaqua bastantes para a criação dos objetos que serão utilizados nas políticas de firewall.
 
 ---
 
-# 9. Fase 4 — Backup / Snapshot
+# 10. Fase 4 — Backup / Snapshot
 
 Antes de qualquer alteração, realizar backup da configuração.
 
@@ -375,9 +554,9 @@ CHANGE-ID: VPN-20260830-001
 
 ---
 
-# 10. Fase 5 — Configuração do FortiGate
+# 11. Fase 5 — Configuração do FortiGate
 
-## 10.1 Phase 1 / IKE
+## 11.1 Phase 1 / IKE
 
 Criar o túnel IPsec utilizando os parâmetros definidos.
 
@@ -410,11 +589,11 @@ No FortiGate, a configuração deverá ser criada utilizando a API ou mecanismo 
 
 ### Comentário
 
-No caso de um script único, alguma variáveis podem ser utilizadas em ambas os equipamentos como a parte de IKE, Autenticação e criptografia. Paramentros que tem o mesmo valor mais formatos diferentes precisam ter variáveis diferente. 
+No caso de um script único, algumas variáveis podem ser utilizadas em ambas os equipamentos como IKE, autenticação e criptografia. Parâmetros que tem o mesmo valor mas formatos diferentes precisam ter variáveis diferentes.
 
 ---
 
-# 11. Fase 6 — Configuração da Phase 2
+# 12. Fase 6 — Configuração da Phase 2
 
 Configurar os parâmetros IPsec.
 
@@ -460,7 +639,7 @@ Os selectors precisam ser compatíveis nos dois lados.
 
 ---
 
-# 12. Fase 7 — Objetos de endereço
+# 13. Fase 7 — Objetos de endereço
 
 Criar os objetos necessários.
 
@@ -501,7 +680,7 @@ Isso facilita troubleshooting e manutenção.
 
 ---
 
-# 13. Fase 8 — Roteamento
+# 14. Fase 8 — Roteamento
 
 A automação deverá configurar a rota necessária para encaminhar o tráfego para o túnel.
 
@@ -536,7 +715,7 @@ Para uma VPN site-to-site simples, **rotas estáticas são a opção mais simple
 
 ---
 
-# 14. Fase 9 — Security Policy
+# 15. Fase 9 — Security Policy
 
 A automação deverá criar as políticas de segurança necessárias.
 
@@ -589,7 +768,7 @@ A automação deverá validar explicitamente esse parâmetro.
 
 ---
 
-# 15. Fase 10 — Configuração do Palo Alto
+# 16. Fase 10 — Configuração do Palo Alto
 
 No Palo Alto deverão ser configurados os componentes necessários:
 
@@ -631,7 +810,7 @@ A interface/túnel deverá ser associada à zona e ao Virtual Router conforme a 
 
 ---
 
-# 16. Fase 11 — Commit / Aplicação da configuração
+# 17. Fase 11 — Commit / Aplicação da configuração
 
                     Python Automation
                            |
@@ -654,11 +833,11 @@ A interface/túnel deverá ser associada à zona e ao Virtual Router conforme a 
                                                    |
                                                  Commit
 
-Esta fase deverá ser tratada com cuidado porque os dois fabricantes possuem modelos diferentes de aplicação de configuração. De acordo com a arvore acima o script de automação pode gerar os arquivos de configuração ou aplicar a configuração via API 
-Uma forma de prevenção e controle seria utilizamos no Fortigate o Workpace mode. O Workspace Mode do FortiOS permite realizar um conjunto de alterações dentro de uma transação e só torná-las efetivas quando a transação é submetida. 
-Antes do commit, as alterações podem ser modificadas ou descartadas. Além disso, objetos envolvidos ficam bloqueados para evitar alterações concorrentes. o timeout padrão é de 5 minutos sem atividade. Se não houver atividade durante esse período, 
-a transação expira e todas as alterações pendentes são descartadas. Isso é importante caso haja alguma perda de conectividade com o equipamento em caso de configuração equivocada. 
-No palo alto poderiamos utilizar o Validade, que não faz a mesma coisa da workspace mode do Fortigate, mas ajuda a verificar a configuração antes do commit. O Validate consegue verificar coisas como:
+Esta fase deverá ser tratada com cuidado porque os dois fabricantes possuem modelos diferentes de aplicação de configuração. De acordo com a arvore acima o script de automação pode gerar os arquivos de configuração ou aplicar a configuração via API.
+Uma forma de prevenção e controle seria utilizarmos no FortiGate o Workspace mode. O Workspace Mode do FortiOS permite realizar um conjunto de alterações dentro de uma transação e só torná-las efetivas quando a transação é submetida.
+Antes do commit, as alterações podem ser modificadas ou descartadas. Além disso, objetos envolvidos ficam bloqueados para evitar alterações concorrentes. o timeout padrão é de 5 minutos sem atividade. Se não houver atividade durante esse período,
+a transação expira e todas as alterações pendentes são descartadas. Isso é importante caso haja alguma perda de conectividade com o equipamento em caso de configuração equivocada.
+No palo alto poderiamos utilizar o Validate, que não faz a mesma coisa da workspace mode do FortiGate, mas ajuda a verificar a configuração antes do commit. O Validate consegue verificar coisas como:
 sintaxe;
 referências entre objetos;
 parâmetros obrigatórios;
@@ -666,13 +845,37 @@ consistência da configuração;
 erros que fariam o commit falhar.
 
 O que é o DRY-RUN
-Dry-run é um modo de execução em que a automação executa todas as validações e calcula o que faria, mas não realiza nenhuma alteração nos equipamentos. Função da automação para gerar os Scripts, caso a API não seja utilizada. 
+Dry-run é um modo de execução em que a automação executa todas as validações e calcula o que faria, mas não realiza nenhuma alteração nos equipamentos. Função da automação para gerar os Scripts, caso a API não seja utilizada.
+
+DRY-RUN - fases
+```text
+  [PASS] Parameters
+  [PASS] Compatibility
+  [PASS] Routing
+  [PASS] Preflight
+
+Changes:
+
+FortiGate
+  CREATE phase1-interface VPN-FGT-PA-001
+  CREATE phase2-interface VPN-FGT-PA-001
+  CREATE route 10.20.20.0/24
+  CREATE policy 100
+
+Palo Alto
+  CREATE IKE Gateway
+  CREATE IPsec Tunnel
+  CREATE Route
+  CREATE Security Policy
+
+NO CHANGES APPLIED
+```
 
 ## FortiGate
 
 Aplicar a configuração através da API.
 
-Após a alteração: Validar a configuração 
+Após a alteração: Validar a configuração
 
 ```text
 Configuração aplicada
@@ -704,7 +907,7 @@ Não considerar a operação concluída somente porque a API aceitou a alteraç�
 
 ---
 
-# 17. Fase 12 — Validação da Phase 1
+# 18. Fase 12 — Validação da Phase 1
 
 Após a aplicação, verificar a negociação IKE.
 
@@ -737,7 +940,7 @@ A automação deverá registrar:
 
 ---
 
-# 18. Fase 13 — Validação da Phase 2
+# 19. Fase 13 — Validação da Phase 2
 
 Depois da Phase 1, verificar a SA IPsec.
 
@@ -778,9 +981,9 @@ Um túnel pode estar operacional na negociação IKE/IPsec e ainda assim não tr
 
 ---
 
-# 19. Fase 14 — Teste de conectividade
+# 20. Fase 14 — Teste de conectividade
 
-Realizar testes de ponta a ponta. Podemos relizar um Ping de uma interface LAN do equipamento(O Ip da interface do Local Selector para o Remote Selector)
+Realizar testes de ponta a ponta. Podemos realizar um Ping de uma interface LAN do equipamento (o IP da interface do Local Selector para o Remote Selector)
 
 Exemplo:
 
@@ -820,7 +1023,7 @@ Host B → Host A
 
 ---
 
-# 20. Fase 15 — Validação dos contadores
+# 21. Fase 15 — Validação dos contadores
 
 A automação deverá coletar os contadores antes e depois do teste.
 
@@ -842,12 +1045,33 @@ RX = 1210
 A alteração dos contadores fornece evidência de que o tráfego realmente passou pelo túnel.
 
 ---
+# 22. Desafios e riscos da automação
 
+A automação deverá considerar os principais desafios e riscos específicos de uma implantação de VPN IPsec entre fabricantes diferentes.
+
+| Desafio / risco | Impacto | Tratamento previsto |
+|---|---|---|
+| Diferenças entre FortiOS e PAN-OS | Parâmetros equivalentes podem possuir nomes, formatos ou modelos de configuração diferentes. | Validar e converter os parâmetros antes da aplicação. |
+| Incompatibilidade IKE/IPsec | O túnel pode não estabelecer ou negociar uma proposta diferente da esperada. | Executar compatibility check e validar a proposta efetivamente negociada. |
+| Traffic Selectors | IKE/IPsec pode estar `UP` sem que o tráfego passe corretamente. | Validar selectors nos dois lados e testar tráfego. |
+| Conflito de rotas | O tráfego pode seguir outra rota em vez do túnel. | Consultar rotas antes da alteração e validar após a implantação. |
+| NAT e Security Policy | O túnel pode estar `UP`, mas o tráfego pode ser bloqueado ou sofrer NAT indevido. | Validar políticas, NAT e fluxo nos dois sentidos. |
+| VDOM / VSYS / Virtual Router | A configuração pode ser aplicada no contexto lógico incorreto. | Coletar e validar o contexto antes da configuração. |
+| Falha parcial entre os fabricantes | Um equipamento pode aplicar a alteração enquanto o outro falha. | Controlar o estado da execução e executar rollback conforme a etapa alcançada. |
+| Falha de API ou Commit | A API pode aceitar a requisição sem que a configuração esteja efetivamente aplicada. | Validar o resultado da operação e realizar verificações pós-commit. |
+| Execução repetida | Pode gerar objetos ou configurações duplicadas. | Utilizar idempotência e comparação do estado atual com o desejado. |
+| Exposição de credenciais/PSK | Comprometimento das credenciais utilizadas pela automação. | Utilizar Secret Manager, privilégio mínimo, HTTPS e logs sem secrets. |
+
+O principal risco operacional é a ausência de uma transação única entre os dois fabricantes. O FortiGate e o Palo Alto possuem mecanismos próprios para controle da configuração, mas não existe uma transação distribuída que faça o commit dos dois equipamentos de forma atômica. Portanto, a automação deverá controlar explicitamente o estado da execução e estar preparada para falhas parciais.
+
+Além disso, `IKE SA = UP` e `IPsec SA = UP` não deverão ser considerados, isoladamente, como indicação de sucesso. A validação deverá continuar até confirmar roteamento, políticas, tráfego e incremento dos contadores TX/RX.
+
+---
 
 
 ---
 
-# 21. Fase 17 — Evidências
+# 23. Fase 16 — Evidências
 
 A automação deverá produzir um relatório final.
 
@@ -910,7 +1134,7 @@ SUCCESS
 
 ---
 
-# 23. Tratamento de erros
+# 24. Tratamento de erros
 
 A automação deverá possuir tratamento específico para falhas.
 
@@ -944,9 +1168,9 @@ Nenhuma etapa posterior deverá ser executada quando uma etapa crítica falhar.
 
 ---
 
-# 24. Estratégia de Rollback
+# 25. Estratégia de Rollback
 
-O rollback deverá ser definido antes da implantação. Desfazer as configurações ou restaurar backup em casos mais graves. 
+O rollback deverá ser definido antes da implantação, para desfazer as configurações ou restaurar o backup em casos mais graves.
 
 ## Cenário 1 — Falha antes da aplicação
 
@@ -985,7 +1209,7 @@ Rollback validado
 
 ---
 
-# 25. Idempotência
+# 26. Idempotência
 
 A automação deverá ser projetada para ser executada múltiplas vezes.
 
@@ -1019,7 +1243,7 @@ Isso é fundamental para evitar configurações duplicadas.
 
 ---
 
-# 26. Estrutura recomendada da automação
+# 27. Estrutura recomendada da automação
 
 Uma estrutura possível utilizando Python:
 
@@ -1030,14 +1254,14 @@ vpn-automation/
 ├── README.md
 │
 ├── inventory/
-│   └── production.yml # Ele define quais equipamentos existem, como a automação deve acessá-los e em qual ambiente eles estão. IP,api_port, DNS
+│   └── production.yml # Ele define quais equipamentos existentes, como a automação deve acessá-los e em qual ambiente eles estão. IP, api_port, DNS
 │
 ├── variables/
-│   └── vpn-001.yml    # Esse arquivo define os parâmetros da VPN.Como:name,IKE, local_networks, autenticação e criptogtafia
+│   └── vpn-001.yml    # Esse arquivo define os parâmetros da VPN.Como: name, IKE, local_networks, autenticação e criptografia
 │
 │
 ├── secrets/
-│   └── vault-reference.yml   # Armazena somente referências para o Secret Manager 
+│   └── vault-reference.yml   # Armazena somente referências para o Secret Manager
 │
 ├── src/
 │   ├── main.py
@@ -1052,7 +1276,7 @@ vpn-automation/
 │
 └── logs/
 
-Etapas de execução no Fortigate 
+Etapas de execução no FortiGate
 
 class FortiGate:
 
@@ -1079,7 +1303,10 @@ class FortiGate:
 
     def create_phase2(self, config):
         pass
-
+		
+  	def enderecar_Tunel(self, config):
+        pass
+		
     def create_route(self, config):
         pass
 
@@ -1097,8 +1324,8 @@ class FortiGate:
 
     def verify_tunnel(self):
         pass
-		
-Etapa  de execução no Palo Alto 
+
+Etapas de execução no Palo Alto
 
 class PaloAlto:
 
@@ -1121,6 +1348,9 @@ class PaloAlto:
         pass
 
     def create_ipsec_tunnel(self, config):
+        pass
+		
+	def enderecar_Tunel(self, config):
         pass
 
     def create_route(self, config):
@@ -1146,7 +1376,7 @@ class PaloAlto:
 
 ---
 
-# 27. Fluxo completo
+# 28. Fluxo completo
 
 O fluxo recomendado é:
 
@@ -1214,7 +1444,7 @@ O fluxo recomendado é:
 
 ---
 
-# 28. Critérios de sucesso
+# 29. Critérios de sucesso
 
 A automação somente deverá retornar **SUCCESS** quando todos os critérios forem atendidos:
 
@@ -1237,13 +1467,13 @@ A automação somente deverá retornar **SUCCESS** quando todos os critérios fo
 
 ---
 
-# 29. Considerações de segurança da automação
+# 30. Considerações de segurança da automação
 
 As credenciais utilizadas pela automação não deverão ser armazenadas diretamente no código.
 
 Não utilizar:
 
-```python
+```Python
 username = "admin"
 password = "MinhaSenha123"
 ```
@@ -1272,7 +1502,7 @@ Também deverão ser aplicados:
 
 ---
 
-# 30. Tecnologias recomendadas
+# 31. Tecnologias recomendadas
 
 Para uma implementação corporativa, a seguinte arquitetura é recomendada:
 
@@ -1284,7 +1514,7 @@ Git
 CI/CD
  |
  v
-Python 
+Python
  |
  +------------------+
  |                  |
