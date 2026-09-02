@@ -89,10 +89,10 @@ Certifique-se de possuir o **Python 3** instalado em sua máquina antes de pross
 
 Este repositório também contém os seguintes arquivos complementares:
 
-* **Backup do Switch (.txt): arquivo de configuração de um switch de laboratório, gerado pelo script de automação. 
+* **Backup do Switch (.txt):** arquivo de configuração de um switch de laboratório, gerado pelo script de automação. 
 O backup tem como objetivo demonstrar as configurações aplicadas e o resultado obtido por meio da execução do script.
-* **Plano de Automação — VPN IPsec FortiGate ↔ Palo Alto (.md): documento em formato Markdown que apresenta o plano de execução para a automação
+* **Plano de Automação — VPN IPsec FortiGate ↔ Palo Alto (.md):** documento em formato Markdown que apresenta o plano de execução para a automação
 da criação de túneis VPN IPsec entre FortiGate e Palo Alto, incluindo as principais etapas, configurações e considerações para a implementação.
-* **Arquivos de configuração de VPN: exemplos das configurações necessárias para o estabelecimento de uma VPN IPsec entre FortiGate e Palo Alto, servindo como referência para a automação.
-* **Script de teste de conectividade via API: script utilizado para validar a comunicação com os equipamentos por meio de API após 
+* **Arquivos de configuração de VPN:** exemplos das configurações necessárias para o estabelecimento de uma VPN IPsec entre FortiGate e Palo Alto, servindo como referência para a automação.
+* **Script de teste de conectividade via API:** script utilizado para validar a comunicação com os equipamentos por meio de API após 
 o estabelecimento do túnel VPN, permitindo verificar se a conectividade e a integração com os dispositivos estão funcionando conforme esperado.
