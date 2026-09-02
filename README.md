@@ -16,14 +16,18 @@ Certifique-se de possuir o **Python 3** instalado em sua máquina antes de pross
    ```bash
    sudo apt update
    ```
+   Caso não tenha o Python instalado execute o comando abaixo no terminal:
+     ```bash
+   sudo apt install python3
+   ```
 
-2. Instale o suporte à interface gráfica (Tkinter) e o gerenciador de ambientes virtuais:
+3. Instale o suporte à interface gráfica (Tkinter) e o gerenciador de ambientes virtuais:
    ```bash
    sudo apt install python3-tk
    sudo apt install python3.14-venv
    ```
 
-3. Instale a biblioteca de automação de rede (`netmiko`):
+4. Instale a biblioteca de automação de rede (`netmiko`):
    ```bash
    python3 -m pip install netmiko
    ```
@@ -36,7 +40,7 @@ Certifique-se de possuir o **Python 3** instalado em sua máquina antes de pross
    pip install netmiko
    ```
 
-4. Navegue até a pasta do projeto e execute o script:
+5. Navegue até a pasta do projeto e execute o script:
    ```bash
    python3 Script.py
    ```
